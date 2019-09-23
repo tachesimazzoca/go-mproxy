@@ -11,6 +11,7 @@ type MockConn struct {
 	readOffset   int
 	inputBuffer  []byte
 	outputBuffer []byte
+	closed       bool
 	mtx          sync.Mutex
 }
 
@@ -19,6 +20,7 @@ func NewMockConn(rb []byte) *MockConn {
 		readOffset:   0,
 		inputBuffer:  rb,
 		outputBuffer: make([]byte, 0),
+		closed:       false,
 	}
 }
 
@@ -47,6 +49,7 @@ func (mc *MockConn) Write(b []byte) (int, error) {
 }
 
 func (mc *MockConn) Close() error {
+	mc.closed = true
 	return nil
 }
 
@@ -87,9 +90,13 @@ func (mc *MockConn) ResetOutputBuffer() {
 	mc.outputBuffer = make([]byte, 0)
 }
 
+func (mc *MockConn) IsClosed() bool {
+	return mc.closed
+}
+
 func TestSMTPConnectionSend(t *testing.T) {
 	conn := NewMockConn([]byte{})
-	smtpConn := NewSMTPConnection(conn)
+	smtpConn := NewSMTPConnection(NewSMTPHandler(conn))
 	smtpConn.Send("220 Simple Mail Transfer Service ready")
 	expected := "220 Simple Mail Transfer Service ready\r\n"
 	actual := string(conn.CloneOutputBuffer())
@@ -100,7 +107,7 @@ func TestSMTPConnectionSend(t *testing.T) {
 
 func TestHelloCommand(t *testing.T) {
 	conn := NewMockConn([]byte{})
-	smtpConn := NewSMTPConnection(conn)
+	smtpConn := NewSMTPConnection(NewSMTPHandler(conn))
 	st := smtpConn.State()
 	st.ServerName = "test-server"
 	cmd := &HelloCommand{}
@@ -122,7 +129,7 @@ func TestHelloCommand(t *testing.T) {
 
 func TestMailCommand(t *testing.T) {
 	conn := NewMockConn([]byte{})
-	smtpConn := NewSMTPConnection(conn)
+	smtpConn := NewSMTPConnection(NewSMTPHandler(conn))
 	st := smtpConn.State()
 	st.Hello = "EHLO"
 	cmd := &MailCommand{}
@@ -140,7 +147,7 @@ func TestMailCommand(t *testing.T) {
 
 func TestRecipientCommand(t *testing.T) {
 	conn := NewMockConn([]byte{})
-	smtpConn := NewSMTPConnection(conn)
+	smtpConn := NewSMTPConnection(NewSMTPHandler(conn))
 	st := smtpConn.State()
 	st.Hello = "EHLO"
 	cmd := &RecipientCommand{}
@@ -167,7 +174,7 @@ func TestRecipientCommand(t *testing.T) {
 
 func TestResetCommand(t *testing.T) {
 	conn := NewMockConn([]byte{})
-	smtpConn := NewSMTPConnection(conn)
+	smtpConn := NewSMTPConnection(NewSMTPHandler(conn))
 	st := smtpConn.State()
 	st.Hello = "EHLO"
 	st.ServerName = "test-server"
@@ -177,7 +184,7 @@ func TestResetCommand(t *testing.T) {
 	st.Content = []byte("Please visit our online shop!")
 	cmd := &ResetCommand{}
 	conn.ResetOutputBuffer()
-	cmd.Execute(smtpConn, "RESET")
+	cmd.Execute(smtpConn, "RSET")
 	expected := "250 OK\r\n"
 	actual := string(conn.CloneOutputBuffer())
 	if actual != expected {
@@ -194,5 +201,24 @@ func TestResetCommand(t *testing.T) {
 	}
 	if len(st.Content) > 0 {
 		t.Errorf("Content must be empty")
+	}
+}
+
+func TestQuitCommand(t *testing.T) {
+	conn := NewMockConn([]byte{})
+	smtpConn := NewSMTPConnection(NewSMTPHandler(conn))
+	st := smtpConn.State()
+	st.Hello = "EHLO"
+	st.ServerName = "test-server"
+	cmd := &QuitCommand{}
+	conn.ResetOutputBuffer()
+	cmd.Execute(smtpConn, "QUIT")
+	expected := "221 Bye\r\n"
+	actual := string(conn.CloneOutputBuffer())
+	if actual != expected {
+		t.Errorf("expected: %s, actual: %s", expected, actual)
+	}
+	if !conn.IsClosed() {
+		t.Error("net.Conn must be closed")
 	}
 }
