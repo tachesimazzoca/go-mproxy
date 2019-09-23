@@ -119,3 +119,80 @@ func TestHelloCommand(t *testing.T) {
 		t.Errorf("expected: test-client, actual: %s", st.ClientName)
 	}
 }
+
+func TestMailCommand(t *testing.T) {
+	conn := NewMockConn([]byte{})
+	smtpConn := NewSMTPConnection(conn)
+	st := smtpConn.State()
+	st.Hello = "EHLO"
+	cmd := &MailCommand{}
+	conn.ResetOutputBuffer()
+	cmd.Execute(smtpConn, "MAIL FROM: <foo@example.net>")
+	if st.ReturnTo != "foo@example.net" {
+		t.Errorf("expected: foo@example.net, actual: %s", st.ReturnTo)
+	}
+	expected := "250 OK\r\n"
+	actual := string(conn.CloneOutputBuffer())
+	if actual != expected {
+		t.Errorf("expected: %s, actual: %s", expected, actual)
+	}
+}
+
+func TestRecipientCommand(t *testing.T) {
+	conn := NewMockConn([]byte{})
+	smtpConn := NewSMTPConnection(conn)
+	st := smtpConn.State()
+	st.Hello = "EHLO"
+	cmd := &RecipientCommand{}
+	conn.ResetOutputBuffer()
+	cmd.Execute(smtpConn, "RCPT TO: <user1@example.net>")
+	if len(st.Recipients) != 1 ||
+		st.Recipients[0] != "user1@example.net" {
+		t.Errorf("expected: [user1@example.net], actual: %s", st.Recipients)
+	}
+	expected := "250 OK\r\n"
+	actual := string(conn.CloneOutputBuffer())
+	if actual != expected {
+		t.Errorf("expected: %s, actual: %s", expected, actual)
+	}
+	conn.ResetOutputBuffer()
+	cmd.Execute(smtpConn, "RCPT TO: <user2@example.net>")
+	if len(st.Recipients) != 2 ||
+		st.Recipients[0] != "user1@example.net" ||
+		st.Recipients[1] != "user2@example.net" {
+		t.Errorf("expected: [user1@example.net user2@example.net], actual: %s",
+			st.Recipients)
+	}
+}
+
+func TestResetCommand(t *testing.T) {
+	conn := NewMockConn([]byte{})
+	smtpConn := NewSMTPConnection(conn)
+	st := smtpConn.State()
+	st.Hello = "EHLO"
+	st.ServerName = "test-server"
+	st.ReturnTo = "foo@example.net"
+	st.Recipients = []string{"user1@example.net"}
+	st.Headers = []string{"Subject: Awesome products here"}
+	st.Content = []byte("Please visit our online shop!")
+	cmd := &ResetCommand{}
+	conn.ResetOutputBuffer()
+	cmd.Execute(smtpConn, "RESET")
+	expected := "250 OK\r\n"
+	actual := string(conn.CloneOutputBuffer())
+	if actual != expected {
+		t.Errorf("expected: %s, actual: %s", expected, actual)
+	}
+	if st.ReturnTo != "" {
+		t.Errorf("ReturnTo must be empty")
+	}
+	if len(st.Recipients) > 0 {
+		t.Errorf("Recipients must be empty")
+	}
+	if len(st.Headers) > 0 {
+		t.Errorf("Headers must be empty")
+	}
+	if len(st.Content) > 0 {
+		t.Errorf("Content must be empty")
+	}
+}

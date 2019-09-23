@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"net"
 	"net/textproto"
+	"regexp"
 	"strings"
 )
 
@@ -17,8 +18,15 @@ type SMTPState struct {
 	Content    []byte
 }
 
-func (ss *SMTPState) HasStarted() bool {
-	return len(ss.Hello) > 0
+func (st *SMTPState) HasStarted() bool {
+	return len(st.Hello) > 0
+}
+
+func (st *SMTPState) Reset() {
+	st.ReturnTo = ""
+	st.Recipients = make([]string, 0)
+	st.Headers = make([]string, 0)
+	st.Content = make([]byte, 0)
 }
 
 type SMTPConnection struct {
@@ -66,13 +74,14 @@ func (cmd *HelloCommand) Execute(conn *SMTPConnection, s string) error {
 	st := conn.State()
 	st.Hello = xs[0]
 	st.ClientName = xs[1]
-	conn.Send(
+	return conn.Send(
 		"250-"+st.ServerName,
 		"250-AUTH PLAIN",
 		"250 HELP",
 	)
-	return nil
 }
+
+var mailCommandPattern = regexp.MustCompile("^MAIL FROM: *<([^>]+)> *$")
 
 type MailCommand struct {
 }
@@ -81,9 +90,15 @@ func (cmd *MailCommand) Execute(conn *SMTPConnection, line string) error {
 	if !conn.State().HasStarted() {
 		return conn.Send("550 Session has not started yet.")
 	}
-	conn.State().ReturnTo = line
-	return nil
+	xs := mailCommandPattern.FindStringSubmatch(line)
+	if xs == nil || len(xs) != 2 {
+		return conn.Send("550 Invalid syntax MAIL FROM: <foo@example.net>")
+	}
+	conn.State().ReturnTo = xs[1]
+	return conn.Send("250 OK")
 }
+
+var recipientCommandPattern = regexp.MustCompile("^RCPT TO: *<([^>]+)> *$")
 
 type RecipientCommand struct {
 }
@@ -92,7 +107,36 @@ func (cmd *RecipientCommand) Execute(conn *SMTPConnection, line string) error {
 	if !conn.State().HasStarted() {
 		return conn.Send("550 Session has not started yet.")
 	}
+
+	// TODO: Check if MAIL FROM is specified?
+
+	xs := recipientCommandPattern.FindStringSubmatch(line)
+	if xs == nil || len(xs) != 2 {
+		return conn.Send("550 Invalid syntax RCPT TO: <foo@example.net>")
+	}
 	st := conn.State()
-	st.Recipients = append(st.Recipients, line)
-	return nil
+	st.Recipients = append(st.Recipients, xs[1])
+	return conn.Send("250 OK")
+}
+
+type ResetCommand struct {
+}
+
+func (cmd *ResetCommand) Execute(conn *SMTPConnection, line string) error {
+	conn.State().Reset()
+	return conn.Send("250 OK")
+}
+
+type VerifyCommand struct {
+}
+
+func (cmd *VerifyCommand) Execute(conn *SMTPConnection, line string) error {
+	return conn.Send("550 VRFY not supported")
+}
+
+type NopeCommand struct {
+}
+
+func (cmd *NopeCommand) Execute(conn *SMTPConnection, line string) error {
+	return conn.Send("250 OK")
 }
