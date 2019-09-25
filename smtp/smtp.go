@@ -2,6 +2,7 @@ package smtp
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"net/textproto"
 	"regexp"
@@ -27,6 +28,21 @@ func (st *SMTPState) Reset() {
 	st.Recipients = make([]string, 0)
 	st.Headers = make([]string, 0)
 	st.Content = make([]byte, 0)
+}
+
+func (st *SMTPState) String() string {
+	s := ""
+	s += fmt.Sprintf("MAIL FROM: <%s>\r\n", st.ReturnTo)
+	for _, x := range st.Recipients {
+		s += fmt.Sprintf("RCPT TO: <%s>\r\n", x)
+	}
+	s += "DATA\r\n"
+	for _, x := range st.Headers {
+		s += fmt.Sprintf("%s\r\n", x)
+	}
+	s += "\r\n"
+	s += string(st.Content)
+	return s
 }
 
 type SMTPConnection struct {
@@ -165,6 +181,38 @@ func (cmnd *QuitCommand) Execute(conn *SMTPConnection, line string) error {
 	return conn.Send("221 Bye")
 }
 
+type DataCommand struct {
+}
+
+func (cmnd *DataCommand) Execute(conn *SMTPConnection, line string) error {
+	var err error
+	if err = conn.Send("250 OK"); err != nil {
+		return err
+	}
+	lines, err := conn.ReadDotLines()
+	if err != nil {
+		return err
+	}
+	headers := make([]string, 0)
+	content := make([]byte, 0)
+	inBody := false
+	for _, x := range lines {
+		if !inBody && len(strings.TrimSpace(x)) == 0 {
+			inBody = true
+			continue
+		}
+		if inBody {
+			content = append(content, []byte(x+"\r\n")...)
+		} else {
+			headers = append(headers, x)
+		}
+	}
+	st := conn.State()
+	st.Headers = headers
+	st.Content = content
+	return nil
+}
+
 type SMTPHandler struct {
 	conn    net.Conn
 	closing bool
@@ -179,6 +227,7 @@ var smtpCommandMap = map[string]SMTPCommand{
 	"VRFY": &VerifyCommand{},
 	"NOOP": &NoopCommand{},
 	"QUIT": &QuitCommand{},
+	"DATA": &DataCommand{},
 }
 
 func NewSMTPHandler(conn net.Conn) *SMTPHandler {

@@ -94,6 +94,37 @@ func (mc *MockConn) IsClosed() bool {
 	return mc.closed
 }
 
+func TestSMTPStateString(t *testing.T) {
+	st := SMTPState{
+		ReturnTo:   "foo@example.net",
+		Recipients: []string{"user1@example.net", "user2@example.net"},
+		Headers: []string{
+			"From: Foo<foo@example.net>",
+			"To: User1<user1@example.net>",
+			"Cc: User2<user2@example.net>",
+			"Subject: Reveal SMTP State Stringer",
+		},
+		Content: []byte("This is a test message.\r\n" +
+			"Are you sure?\r\n"),
+	}
+	expected := "MAIL FROM: <foo@example.net>\r\n" +
+		"RCPT TO: <user1@example.net>\r\n" +
+		"RCPT TO: <user2@example.net>\r\n" +
+		"DATA\r\n" +
+		"From: Foo<foo@example.net>\r\n" +
+		"To: User1<user1@example.net>\r\n" +
+		"Cc: User2<user2@example.net>\r\n" +
+		"Subject: Reveal SMTP State Stringer\r\n" +
+		"\r\n" +
+		"This is a test message.\r\n" +
+		"Are you sure?\r\n"
+
+	actual := st.String()
+	if expected != actual {
+		t.Errorf("expected: %s, actual: %s", expected, actual)
+	}
+}
+
 func TestSMTPConnectionSend(t *testing.T) {
 	conn := NewMockConn([]byte{})
 	smtpConn := NewSMTPConnection(NewSMTPHandler(conn))
