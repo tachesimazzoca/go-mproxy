@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net"
 
@@ -19,7 +20,10 @@ func main() {
 	for {
 		conn, err := lsnr.Accept()
 		assertNoError(err)
-		h := smtp.NewSMTPHandler(conn)
+		h := smtp.NewSMTPHandler(conn, func(st *smtp.SMTPState) error {
+			fmt.Println(st)
+			return nil
+		})
 		go h.Run()
 	}
 }

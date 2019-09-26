@@ -127,8 +127,8 @@ func TestSMTPStateString(t *testing.T) {
 
 func TestSMTPConnectionSend(t *testing.T) {
 	conn := NewMockConn([]byte{})
-	smtpConn := NewSMTPConnection(NewSMTPHandler(conn))
-	smtpConn.Send("220 Simple Mail Transfer Service ready")
+	smtpConn := NewSMTPConnection(NewSMTPHandler(conn, nil))
+	smtpConn.Write("220 Simple Mail Transfer Service ready")
 	expected := "220 Simple Mail Transfer Service ready\r\n"
 	actual := string(conn.CloneOutputBuffer())
 	if actual != expected {
@@ -138,7 +138,7 @@ func TestSMTPConnectionSend(t *testing.T) {
 
 func TestHelloCommand(t *testing.T) {
 	conn := NewMockConn([]byte{})
-	smtpConn := NewSMTPConnection(NewSMTPHandler(conn))
+	smtpConn := NewSMTPConnection(NewSMTPHandler(conn, nil))
 	st := smtpConn.State()
 	st.ServerName = "test-server"
 	cmd := &HelloCommand{}
@@ -160,7 +160,7 @@ func TestHelloCommand(t *testing.T) {
 
 func TestMailCommand(t *testing.T) {
 	conn := NewMockConn([]byte{})
-	smtpConn := NewSMTPConnection(NewSMTPHandler(conn))
+	smtpConn := NewSMTPConnection(NewSMTPHandler(conn, nil))
 	st := smtpConn.State()
 	st.Hello = "EHLO"
 	cmd := &MailCommand{}
@@ -178,7 +178,7 @@ func TestMailCommand(t *testing.T) {
 
 func TestRecipientCommand(t *testing.T) {
 	conn := NewMockConn([]byte{})
-	smtpConn := NewSMTPConnection(NewSMTPHandler(conn))
+	smtpConn := NewSMTPConnection(NewSMTPHandler(conn, nil))
 	st := smtpConn.State()
 	st.Hello = "EHLO"
 	cmd := &RecipientCommand{}
@@ -205,7 +205,7 @@ func TestRecipientCommand(t *testing.T) {
 
 func TestResetCommand(t *testing.T) {
 	conn := NewMockConn([]byte{})
-	smtpConn := NewSMTPConnection(NewSMTPHandler(conn))
+	smtpConn := NewSMTPConnection(NewSMTPHandler(conn, nil))
 	st := smtpConn.State()
 	st.Hello = "EHLO"
 	st.ServerName = "test-server"
@@ -237,7 +237,7 @@ func TestResetCommand(t *testing.T) {
 
 func TestQuitCommand(t *testing.T) {
 	conn := NewMockConn([]byte{})
-	smtpConn := NewSMTPConnection(NewSMTPHandler(conn))
+	smtpConn := NewSMTPConnection(NewSMTPHandler(conn, nil))
 	st := smtpConn.State()
 	st.Hello = "EHLO"
 	st.ServerName = "test-server"

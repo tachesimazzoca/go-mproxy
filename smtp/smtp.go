@@ -73,13 +73,17 @@ func (smtpConn *SMTPConnection) ReadDotLines() ([]string, error) {
 	return smtpConn.reader.ReadDotLines()
 }
 
-func (smtpConn *SMTPConnection) Send(msg ...string) error {
+func (smtpConn *SMTPConnection) Write(msg ...string) error {
 	for _, x := range msg {
 		if err := smtpConn.writer.PrintfLine(x); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (smtpConn *SMTPConnection) Send(st *SMTPState) error {
+	return smtpConn.handler.Send(st)
 }
 
 func (smtpConn *SMTPConnection) Quit() error {
@@ -95,16 +99,16 @@ type HelloCommand struct {
 
 func (cmnd *HelloCommand) Execute(conn *SMTPConnection, s string) error {
 	if conn.State().HasStarted() {
-		return conn.Send("550 Session has started")
+		return conn.Write("550 Session has started")
 	}
 	xs := strings.SplitN(strings.TrimSpace(s), " ", 2)
 	if len(xs) < 2 {
-		return conn.Send("550 Invalid syntax (EHLO|HELO) domain")
+		return conn.Write("550 Invalid syntax (EHLO|HELO) domain")
 	}
 	st := conn.State()
 	st.Hello = xs[0]
 	st.ClientName = xs[1]
-	return conn.Send(
+	return conn.Write(
 		"250-"+st.ServerName,
 		"250-AUTH PLAIN",
 		"250 HELP",
@@ -118,14 +122,14 @@ type MailCommand struct {
 
 func (cmnd *MailCommand) Execute(conn *SMTPConnection, line string) error {
 	if !conn.State().HasStarted() {
-		return conn.Send("550 Session has not started yet.")
+		return conn.Write("550 Session has not started yet.")
 	}
 	xs := mailCommandPattern.FindStringSubmatch(line)
 	if xs == nil || len(xs) != 2 {
-		return conn.Send("550 Invalid syntax MAIL FROM: <foo@example.net>")
+		return conn.Write("550 Invalid syntax MAIL FROM: <foo@example.net>")
 	}
 	conn.State().ReturnTo = xs[1]
-	return conn.Send("250 OK")
+	return conn.Write("250 OK")
 }
 
 var recipientCommandPattern = regexp.MustCompile("^RCPT TO: *<([^>]+)> *$")
@@ -135,18 +139,18 @@ type RecipientCommand struct {
 
 func (cmnd *RecipientCommand) Execute(conn *SMTPConnection, line string) error {
 	if !conn.State().HasStarted() {
-		return conn.Send("550 Session has not started yet.")
+		return conn.Write("550 Session has not started yet.")
 	}
 
 	// TODO: Check if MAIL FROM is specified?
 
 	xs := recipientCommandPattern.FindStringSubmatch(line)
 	if xs == nil || len(xs) != 2 {
-		return conn.Send("550 Invalid syntax RCPT TO: <foo@example.net>")
+		return conn.Write("550 Invalid syntax RCPT TO: <foo@example.net>")
 	}
 	st := conn.State()
 	st.Recipients = append(st.Recipients, xs[1])
-	return conn.Send("250 OK")
+	return conn.Write("250 OK")
 }
 
 type ResetCommand struct {
@@ -154,21 +158,21 @@ type ResetCommand struct {
 
 func (cmnd *ResetCommand) Execute(conn *SMTPConnection, line string) error {
 	conn.State().Reset()
-	return conn.Send("250 OK")
+	return conn.Write("250 OK")
 }
 
 type VerifyCommand struct {
 }
 
 func (cmnd *VerifyCommand) Execute(conn *SMTPConnection, line string) error {
-	return conn.Send("550 VRFY not supported")
+	return conn.Write("550 VRFY not supported")
 }
 
 type NoopCommand struct {
 }
 
 func (cmnd *NoopCommand) Execute(conn *SMTPConnection, line string) error {
-	return conn.Send("250 OK")
+	return conn.Write("250 OK")
 }
 
 type QuitCommand struct {
@@ -178,7 +182,7 @@ func (cmnd *QuitCommand) Execute(conn *SMTPConnection, line string) error {
 	if err := conn.Quit(); err != nil {
 		return err
 	}
-	return conn.Send("221 Bye")
+	return conn.Write("221 Bye")
 }
 
 type DataCommand struct {
@@ -186,7 +190,7 @@ type DataCommand struct {
 
 func (cmnd *DataCommand) Execute(conn *SMTPConnection, line string) error {
 	var err error
-	if err = conn.Send("250 OK"); err != nil {
+	if err = conn.Write("250 OK"); err != nil {
 		return err
 	}
 	lines, err := conn.ReadDotLines()
@@ -210,12 +214,14 @@ func (cmnd *DataCommand) Execute(conn *SMTPConnection, line string) error {
 	st := conn.State()
 	st.Headers = headers
 	st.Content = content
-	return nil
+	return conn.Send(st)
 }
 
 type SMTPHandler struct {
 	conn    net.Conn
 	closing bool
+
+	Send func(st *SMTPState) error
 }
 
 var smtpCommandMap = map[string]SMTPCommand{
@@ -230,10 +236,16 @@ var smtpCommandMap = map[string]SMTPCommand{
 	"DATA": &DataCommand{},
 }
 
-func NewSMTPHandler(conn net.Conn) *SMTPHandler {
+func NewSMTPHandler(conn net.Conn, f func(st *SMTPState) error) *SMTPHandler {
+	if f == nil {
+		f = func(st *SMTPState) error {
+			return nil
+		}
+	}
 	return &SMTPHandler{
 		conn:    conn,
 		closing: false,
+		Send:    f,
 	}
 }
 
@@ -244,7 +256,7 @@ func (h *SMTPHandler) Conn() net.Conn {
 func (h *SMTPHandler) Run() error {
 	defer h.Close()
 	smtpConn := NewSMTPConnection(h)
-	smtpConn.Send("220 Simple Mail Transfer service ready")
+	smtpConn.Write("220 Simple Mail Transfer service ready")
 	for !h.closing {
 		line, err := smtpConn.ReadLine()
 		if err != nil {
@@ -252,7 +264,7 @@ func (h *SMTPHandler) Run() error {
 		}
 		xs := strings.SplitN(strings.TrimSpace(line), " ", 2)
 		if len(xs) == 0 {
-			if err := smtpConn.Send("550 Command must not be empty"); err != nil {
+			if err := smtpConn.Write("550 Command must not be empty"); err != nil {
 				return err
 			}
 		}
@@ -261,7 +273,7 @@ func (h *SMTPHandler) Run() error {
 				return err
 			}
 		} else {
-			if err := smtpConn.Send("550 Command not recognized"); err != nil {
+			if err := smtpConn.Write("550 Command not recognized"); err != nil {
 				return err
 			}
 		}
